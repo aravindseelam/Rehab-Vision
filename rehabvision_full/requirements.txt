@@ -1,0 +1,20 @@
+# ══════════════════════════════════════════════════════
+#  RehabVision — Python Dependencies
+#  Install: pip install -r requirements.txt
+# ══════════════════════════════════════════════════════
+
+# ── Web Framework ──────────────────────────────────────
+flask==3.0.3
+flask-cors==4.0.1          # Cross-origin for dev; remove in production
+
+# ── Computer Vision ────────────────────────────────────
+mediapipe==0.10.14         # Google ML pose detection (33 landmarks)
+opencv-python==4.10.0.84   # Camera capture, drawing, JPEG encode
+
+# ── Numerics ───────────────────────────────────────────
+numpy==1.26.4              # Required by mediapipe + opencv
+
+# ── Python version note ────────────────────────────────
+# Requires Python >= 3.9
+# Tested on Python 3.10 and 3.11
+# mediapipe does not yet support Python 3.13 (as of mid-2024)

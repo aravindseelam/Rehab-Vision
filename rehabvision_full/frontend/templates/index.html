@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RehabVision — Physiotherapy AI Monitor</title>
+
+  <!--
+    ┌─────────────────────────────────────────────────────────┐
+    │  frontend/templates/index.html                          │
+    │                                                         │
+    │  Single-page dashboard for the RehabVision system.      │
+    │  Receives live data via Server-Sent Events (/stream).   │
+    │  Displays annotated camera feed via MJPEG (/video_feed).│
+    └─────────────────────────────────────────────────────────┘
+  -->
+
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════ -->
+<header class="hdr">
+  <div class="hdr-brand">
+    <div class="brand-gem">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <polygon points="11,1 21,7 21,15 11,21 1,15 1,7" fill="none" stroke="#00f5d4" stroke-width="1.5"/>
+        <polygon points="11,5 17,8.5 17,14.5 11,18 5,14.5 5,8.5" fill="#00f5d4" opacity="0.15"/>
+        <circle cx="11" cy="11" r="3" fill="#00f5d4"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">REHABVISION</div>
+      <div class="brand-sub">COMPUTER VISION · PHYSIOTHERAPY MONITOR</div>
+    </div>
+  </div>
+
+  <div class="hdr-center">
+    <div class="status-pill" id="statusPill">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-label" id="statusLabel">STANDBY</span>
+    </div>
+  </div>
+
+  <div class="hdr-right">
+    <div class="hdr-stat">
+      <span class="hdr-val mono" id="fpsBadge">— fps</span>
+      <span class="hdr-lbl">FRAME RATE</span>
+    </div>
+    <div class="hdr-divider"></div>
+    <div class="hdr-stat">
+      <span class="hdr-val mono" id="sessionTimerHdr">00:00</span>
+      <span class="hdr-lbl">SESSION</span>
+    </div>
+    <div class="cam-indicator" id="camIndicator" title="Camera status">
+      <span>📷</span>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════════════════
+     MAIN LAYOUT  (sidebar + content)
+════════════════════════════════════════════════════════════ -->
+<div class="layout">
+
+  <!-- ── LEFT SIDEBAR ──────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Exercise Selector -->
+    <div class="panel">
+      <div class="panel-hdr">
+        <span class="panel-title">Exercise Protocol</span>
+        <span class="panel-badge" id="catBadge">UPPER</span>
+      </div>
+      <div id="exerciseList" class="ex-list">
+        <!-- JS populates this -->
+      </div>
+    </div>
+
+    <!-- Session Controls -->
+    <div class="panel ctrl-panel">
+      <div class="panel-hdr">
+        <span class="panel-title">Session Control</span>
+      </div>
+      <button class="btn-primary" id="btnStart" onclick="startSession()">
+        <span class="btn-icon">▶</span> START SESSION
+      </button>
+      <button class="btn-danger hidden" id="btnStop" onclick="stopSession()">
+        <span class="btn-icon">⬛</span> STOP SESSION
+      </button>
+      <button class="btn-ghost" onclick="resetSession()">
+        <span class="btn-icon">↺</span> RESET
+      </button>
+
+      <!-- Rep goal input -->
+      <div class="goal-row">
+        <label class="goal-label mono">REP GOAL</label>
+        <input type="number" class="goal-input mono" id="repGoalInput"
+               value="10" min="1" max="50" onchange="updateGoal(this.value)"/>
+      </div>
+    </div>
+
+    <!-- Camera Feed -->
+    <div class="panel video-panel">
+      <div class="panel-hdr">
+        <span class="panel-title">Camera Feed</span>
+        <span class="live-chip" id="liveChip">● LIVE</span>
+      </div>
+      <div class="video-wrap">
+        <img id="videoFeed" src="/video_feed" alt="Camera feed" class="video-img"/>
+      </div>
+      <div class="video-footer mono" id="videoFooter">CONNECTING…</div>
+    </div>
+
+  </aside>
+
+  <!-- ── MAIN CONTENT ──────────────────────────────────────────── -->
+  <main class="content">
+
+    <!-- Metric cards row -->
+    <div class="kpi-row">
+      <div class="kpi" id="kpiAngle">
+        <div class="kpi-val" id="kpiAngleVal">—</div>
+        <div class="kpi-lbl">JOINT ANGLE</div>
+        <div class="kpi-sub" id="kpiAngleSub">—° to —°</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val kpi-pink" id="kpiRepsVal">0</div>
+        <div class="kpi-lbl">REPS</div>
+        <div class="kpi-sub" id="kpiRepsSub">goal: 10</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val kpi-blue" id="kpiRomVal">0%</div>
+        <div class="kpi-lbl">ROM COVERAGE</div>
+        <div class="kpi-sub">range of motion</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val kpi-amber" id="kpiTimeVal">00:00</div>
+        <div class="kpi-lbl">SESSION TIME</div>
+        <div class="kpi-sub" id="kpiTimeSub">elapsed</div>
+      </div>
+    </div>
+
+    <!-- Tabbed panel -->
+    <div class="panel tab-host">
+
+      <!-- Tab bar -->
+      <div class="tab-bar" role="tablist">
+        <button class="tab active" id="tab-monitor"  onclick="switchTab('monitor')"  role="tab">MONITOR</button>
+        <button class="tab"        id="tab-analysis" onclick="switchTab('analysis')" role="tab">ANALYSIS</button>
+        <button class="tab"        id="tab-progress" onclick="switchTab('progress')" role="tab">PROGRESS</button>
+        <button class="tab"        id="tab-guide"    onclick="switchTab('guide')"    role="tab">GUIDE</button>
+      </div>
+
+      <!-- ── MONITOR TAB ──────────────────────────────────────────── -->
+      <div id="pane-monitor" class="pane active">
+        <div class="monitor-grid">
+
+          <!-- Left: Angle meter + feedback -->
+          <div class="meter-col">
+            <div class="section-label">Live Joint Angle</div>
+
+            <!-- SVG Angle Meter -->
+            <div class="meter-wrap">
+              <svg class="meter-svg" viewBox="0 0 160 160">
+                <!-- Background ring -->
+                <circle cx="80" cy="80" r="64"
+                        fill="none" stroke="rgba(255,255,255,0.06)"
+                        stroke-width="12"/>
+                <!-- Target zone arc (updated by JS) -->
+                <circle id="meterTarget" cx="80" cy="80" r="64"
+                        fill="none" stroke="rgba(0,245,212,0.12)"
+                        stroke-width="12"
+                        stroke-dasharray="402.1" stroke-dashoffset="402.1"
+                        stroke-linecap="butt"
+                        transform="rotate(-90 80 80)"/>
+                <!-- Active angle arc -->
+                <circle id="meterArc" cx="80" cy="80" r="64"
+                        fill="none" stroke="#00f5d4"
+                        stroke-width="12"
+                        stroke-dasharray="402.1" stroke-dashoffset="402.1"
+                        stroke-linecap="round"
+                        transform="rotate(-90 80 80)"
+                        style="transition: stroke-dashoffset .18s ease,
+                                           stroke .3s ease;
+                               filter: drop-shadow(0 0 8px #00f5d4)"/>
+              </svg>
+
+              <!-- Centre readout -->
+              <div class="meter-center">
+                <div class="meter-angle mono" id="meterAngleVal">—</div>
+                <div class="meter-range mono" id="meterRangeLabel">—°–—°</div>
+              </div>
+            </div>
+
+            <!-- Feedback message -->
+            <div class="feedback-card" id="feedbackCard">
+              <span id="feedbackText">Waiting for session…</span>
+            </div>
+
+            <!-- Range bar -->
+            <div class="range-block">
+              <div class="range-track">
+                <div class="range-target-zone" id="rangeZone"></div>
+                <div class="range-thumb"       id="rangeThumb"></div>
+              </div>
+              <div class="range-axis mono">
+                <span>0°</span>
+                <span id="rangeAxisMid">90°</span>
+                <span>180°</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Rep counter -->
+          <div class="rep-col">
+            <div class="section-label">Repetition Counter</div>
+
+            <div class="rep-big mono" id="repBig">0</div>
+
+            <div class="rep-dots-grid" id="repDots">
+              <!-- JS renders dots -->
+            </div>
+
+            <div class="phase-pill" id="phasePill">PHASE: IDLE</div>
+
+            <!-- Mini progress bar for reps -->
+            <div class="rep-progress-wrap">
+              <div class="rep-progress-track">
+                <div class="rep-progress-fill" id="repProgressFill"></div>
+              </div>
+              <div class="rep-progress-labels mono">
+                <span>0</span>
+                <span id="repGoalLabel">10</span>
+              </div>
+            </div>
+
+            <!-- Velocity indicator -->
+            <div class="velocity-card">
+              <div class="velocity-label mono">MOVEMENT PHASE</div>
+              <div class="velocity-bars" id="velocityBars">
+                <div class="vbar" id="vbar1"></div>
+                <div class="vbar" id="vbar2"></div>
+                <div class="vbar" id="vbar3"></div>
+                <div class="vbar" id="vbar4"></div>
+                <div class="vbar" id="vbar5"></div>
+                <div class="vbar" id="vbar6"></div>
+                <div class="vbar" id="vbar7"></div>
+                <div class="vbar" id="vbar8"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── ANALYSIS TAB ─────────────────────────────────────────── -->
+      <div id="pane-analysis" class="pane hidden">
+
+        <div class="section-label">Angle Time-Series (60 s window)</div>
+        <div class="chart-box">
+          <canvas id="angleChart"></canvas>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-cell">
+            <div class="stat-val mono" id="stMax">—</div>
+            <div class="stat-lbl">PEAK °</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val mono" id="stMin">—</div>
+            <div class="stat-lbl">FLOOR °</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val mono" id="stRange">—</div>
+            <div class="stat-lbl">ROM °</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val mono" id="stAvg">—</div>
+            <div class="stat-lbl">MEAN °</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val mono" id="stCurrent">—</div>
+            <div class="stat-lbl">CURRENT °</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val mono" id="stInRange">—</div>
+            <div class="stat-lbl">IN TARGET</div>
+          </div>
+        </div>
+
+        <!-- All-joints snapshot table -->
+        <div class="section-label" style="margin-top:20px">All Joint Angles</div>
+        <div class="joints-table" id="jointsTable">
+          <div class="jt-row jt-head">
+            <span>JOINT</span><span>ANGLE</span><span>STATUS</span>
+          </div>
+          <!-- Populated by JS -->
+        </div>
+
+      </div>
+
+      <!-- ── PROGRESS TAB ─────────────────────────────────────────── -->
+      <div id="pane-progress" class="pane hidden">
+
+        <div class="section-label">Session Milestones</div>
+        <div class="milestone-scroll" id="milestoneList">
+          <div class="empty-msg mono">Complete reps to see milestones</div>
+        </div>
+
+        <div class="summary-box">
+          <div class="section-label">Session Summary</div>
+          <div class="summary-kpis">
+            <div class="sum-kpi">
+              <div class="sum-val mono" id="sumReps">0</div>
+              <div class="sum-lbl">REPS</div>
+            </div>
+            <div class="sum-kpi">
+              <div class="sum-val mono" id="sumTime">00:00</div>
+              <div class="sum-lbl">DURATION</div>
+            </div>
+            <div class="sum-kpi">
+              <div class="sum-val mono" id="sumRom">0°</div>
+              <div class="sum-lbl">ROM ACHIEVED</div>
+            </div>
+            <div class="sum-kpi">
+              <div class="sum-val mono" id="sumCadence">—</div>
+              <div class="sum-lbl">AVG REP TIME</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ── GUIDE TAB ────────────────────────────────────────────── -->
+      <div id="pane-guide" class="pane hidden">
+        <div class="guide-content" id="guideContent">
+          <!-- Populated by JS when exercise changes -->
+          <div class="empty-msg mono">Select an exercise to see the guide</div>
+        </div>
+      </div>
+
+    </div><!-- end tab-host -->
+
+    <!-- Bottom info bar -->
+    <div class="info-bar">
+      <span class="info-exercise mono" id="infoExName">—</span>
+      <span class="info-joint mono" id="infoJoint">—</span>
+      <span class="info-muscles mono" id="infoMuscles">—</span>
+    </div>
+
+  </main>
+</div><!-- end layout -->
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
