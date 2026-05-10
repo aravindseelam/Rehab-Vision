@@ -8,7 +8,7 @@ flask==3.0.3
 flask-cors==4.0.1          # Cross-origin for dev; remove in production
 
 # ── Computer Vision ────────────────────────────────────
-mediapipe==0.10.14         # Google ML pose detection (33 landmarks)
+mediapipe         # Google ML pose detection (33 landmarks)
 opencv-python==4.10.0.84   # Camera capture, drawing, JPEG encode
 
 # ── Numerics ───────────────────────────────────────────
