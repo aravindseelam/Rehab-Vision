@@ -3,3 +3,4 @@ streamlit-webrtc>=0.47.0
 mediapipe
 opencv-python-headless
 av
+tornado
