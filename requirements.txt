@@ -4,3 +4,4 @@ mediapipe
 opencv-python-headless
 av
 tornado
+protobuf<4
