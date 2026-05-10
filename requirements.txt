@@ -1,6 +1,6 @@
 streamlit
 streamlit-webrtc
-mediapipe==0.9.3.0
+mediapipe==0.10.14
 opencv-python-headless
 av
 tornado
