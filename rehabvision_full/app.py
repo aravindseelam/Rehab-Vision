@@ -2,10 +2,13 @@ import streamlit as st
 import cv2
 import av
 import mediapipe as mp
+
+# --- THE FIX: Direct Absolute Imports for MediaPipe ---
+from mediapipe.python.solutions import pose as mp_pose
+from mediapipe.python.solutions import drawing_utils as mp_draw
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
 # --- 1. Import Backend Logic ---
-# Ensure these files are inside a folder named 'backend'
 from backend.angle_calculator import AngleCalculator
 from backend.exercise_manager import ExerciseManager
 from backend.session_tracker import SessionTracker
@@ -25,21 +28,19 @@ if 'angle_calc' not in st.session_state:
     st.session_state.ex_mgr = ExerciseManager()
     st.session_state.tracker = SessionTracker()
     
-    # Robust MediaPipe Initialization
-    mp_pose_module = mp.solutions.pose
-    st.session_state.mp_pose = mp_pose_module.Pose(
+    # Initialize Pose using the direct import
+    st.session_state.mp_pose = mp_pose.Pose(
         static_image_mode=False,
         model_complexity=1,
         min_detection_confidence=0.5, 
         min_tracking_confidence=0.5
     )
-    st.session_state.mp_draw = mp.solutions.drawing_utils
+    st.session_state.mp_draw = mp_draw
 
 # --- 4. Sidebar Controls ---
 with st.sidebar:
     st.header("Exercise Settings")
     
-    # Get exercises from your manager
     exercises = st.session_state.ex_mgr.get_all_exercises()
     ex_names = {ex['id']: ex['name'] for ex in exercises}
     
@@ -49,7 +50,6 @@ with st.sidebar:
         format_func=lambda x: ex_names[x]
     )
     
-    # Update active exercise logic
     active_ex = st.session_state.ex_mgr.set_exercise(selected_ex_id)
     
     st.info(f"**Target:** {active_ex['joint']}\n\n**Instructions:** {active_ex['instruction']}")
@@ -72,8 +72,8 @@ class PoseProcessor(VideoTransformerBase):
         self.angle_calc = st.session_state.angle_calc
         self.ex_mgr = st.session_state.ex_mgr
         self.tracker = st.session_state.tracker
-        self.mp_pose = st.session_state.mp_pose
-        self.mp_draw = st.session_state.mp_draw
+        self.mp_pose_inst = st.session_state.mp_pose
+        self.mp_draw_inst = st.session_state.mp_draw
 
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
@@ -81,16 +81,16 @@ class PoseProcessor(VideoTransformerBase):
         
         # RGB conversion for MediaPipe
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.mp_pose.process(rgb)
+        results = self.mp_pose_inst.process(rgb)
         
         if results.pose_landmarks:
-            # Draw skeleton overlay
-            self.mp_draw.draw_landmarks(
+            # Draw skeleton overlay (Using direct mp_pose import for POSE_CONNECTIONS)
+            self.mp_draw_inst.draw_landmarks(
                 img, 
                 results.pose_landmarks, 
-                mp.solutions.pose.POSE_CONNECTIONS,
-                self.mp_draw.DrawingSpec(color=(0, 245, 200), thickness=2, circle_radius=2),
-                self.mp_draw.DrawingSpec(color=(255, 255, 255), thickness=2)
+                mp_pose.POSE_CONNECTIONS,
+                self.mp_draw_inst.DrawingSpec(color=(0, 245, 200), thickness=2, circle_radius=2),
+                self.mp_draw_inst.DrawingSpec(color=(255, 255, 255), thickness=2)
             )
             
             # Map landmarks to your backend format
@@ -110,7 +110,7 @@ class PoseProcessor(VideoTransformerBase):
             # Update rep counter
             self.tracker.update(raw_angle, active_ex)
             
-            # Draw HUD (Heads-Up Display)
+            # Draw HUD
             cv2.rectangle(img, (0, 0), (img.shape[1], 50), (10, 15, 30), -1)
             cv2.putText(img, f"ANGLE: {int(raw_angle)} deg", (20, 35), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 245, 200), 2)
@@ -134,12 +134,10 @@ with col_stats:
     st.subheader("Live Performance")
     log = st.session_state.tracker.get_log()
     
-    # Metric cards
     m_col1, m_col2 = st.columns(2)
     m_col1.metric("Total Reps", log["summary"]["total_reps"])
     m_col2.metric("Max Angle", f"{log['summary']['max_angle']}°")
     
-    # Milestone log
     st.write("**Recent Reps**")
     if log["milestones"]:
         st.dataframe(log["milestones"], use_container_width=True, hide_index=True)
