@@ -38,7 +38,6 @@ with st.sidebar:
 # --- 4. Video Processing Logic (Background Thread) ---
 class PoseProcessor(VideoProcessorBase):
     def __init__(self):
-        # We initialize everything directly inside the background thread here!
         self.angle_calc = AngleCalculator()
         self.ex_mgr = ExerciseManager()
         self.tracker = SessionTracker()
@@ -54,31 +53,53 @@ class PoseProcessor(VideoProcessorBase):
         img = cv2.flip(img, 1) 
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        results = self.mp_pose_inst.process(rgb)
-        
-        if results.pose_landmarks:
-            self.mp_draw_inst.draw_landmarks(
-                img, 
-                results.pose_landmarks, 
-                mp.solutions.pose.POSE_CONNECTIONS,
-                self.mp_draw_inst.DrawingSpec(color=(0, 245, 200), thickness=2, circle_radius=2),
-                self.mp_draw_inst.DrawingSpec(color=(255, 255, 255), thickness=2)
-            )
+        # --- THE SAFETY NET: Catch any hidden math errors ---
+        try:
+            results = self.mp_pose_inst.process(rgb)
             
-            landmarks_norm = [{"x": lm.x, "y": lm.y, "z": lm.z, "visibility": lm.visibility} for lm in results.pose_landmarks.landmark]
-            
-            ex_id = self.ex_mgr._active_id
-            active_ex = self.ex_mgr.get_exercise(ex_id)
-            raw_angle = self.angle_calc.get_primary_angle(landmarks_norm, ex_id)
-            feedback = self.ex_mgr.get_feedback(raw_angle, active_ex)
-            
-            # Only track reps if the user pressed 'Start'
-            if self.is_active:
-                self.tracker.update(raw_angle, active_ex)
-            
-            cv2.rectangle(img, (0, 0), (img.shape[1], 50), (10, 15, 30), -1)
-            cv2.putText(img, f"ANGLE: {int(raw_angle)} deg", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 245, 200), 2)
-            cv2.putText(img, feedback.upper(), (280, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            if results.pose_landmarks:
+                # Draw the skeleton overlay
+                self.mp_draw_inst.draw_landmarks(
+                    img, 
+                    results.pose_landmarks, 
+                    mp.solutions.pose.POSE_CONNECTIONS,
+                    self.mp_draw_inst.DrawingSpec(color=(0, 245, 200), thickness=2, circle_radius=2),
+                    self.mp_draw_inst.DrawingSpec(color=(255, 255, 255), thickness=2)
+                )
+                
+                ex_id = getattr(self.ex_mgr, '_active_id', None)
+                
+                # Only do math if the UI has successfully synced the exercise ID!
+                if ex_id is not None:
+                    landmarks_norm = [{"x": lm.x, "y": lm.y, "z": lm.z, "visibility": lm.visibility} for lm in results.pose_landmarks.landmark]
+                    
+                    active_ex = self.ex_mgr.get_exercise(ex_id)
+                    raw_angle = self.angle_calc.get_primary_angle(landmarks_norm, ex_id)
+                    
+                    if raw_angle is not None:
+                        feedback = self.ex_mgr.get_feedback(raw_angle, active_ex)
+                        
+                        # Track reps only if 'Start' was pressed
+                        if self.is_active:
+                            self.tracker.update(raw_angle, active_ex)
+                        
+                        # --- ON-SCREEN METRICS (Updates 30fps!) ---
+                        reps = self.tracker.get_log()["summary"]["total_reps"]
+                        
+                        cv2.rectangle(img, (0, 0), (img.shape[1], 80), (10, 15, 30), -1) # Taller background box
+                        cv2.putText(img, f"ANGLE: {int(raw_angle)} deg", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 245, 200), 2)
+                        cv2.putText(img, f"REPS: {reps}", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                        
+                        # Status/Feedback logic
+                        status_color = (0, 255, 0) if self.is_active else (0, 165, 255)
+                        status_text = feedback.upper() if self.is_active else "PAUSED - PRESS START"
+                        cv2.putText(img, status_text, (250, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+                else:
+                    cv2.putText(img, "SYNCING DATA...", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    
+        except Exception as e:
+            # If the AI ever crashes again, print the EXACT error on your face so we can see it!
+            cv2.putText(img, f"AI ERROR: {str(e)[:40]}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
@@ -86,7 +107,6 @@ class PoseProcessor(VideoProcessorBase):
 col_vid, col_stats = st.columns([2, 1])
 
 with col_vid:
-    # We save the video feed to a variable called 'ctx' (context)
     ctx = webrtc_streamer(
         key="rehab-vision", 
         video_processor_factory=PoseProcessor,
@@ -97,12 +117,12 @@ with col_vid:
 with col_stats:
     st.subheader("Live Performance")
     
-    # If the camera is on, we bridge the background thread back to the UI
     if ctx and ctx.state.playing and ctx.video_processor:
         
-        # Send sidebar updates to the background thread
+        # Sync the sidebar dropdown to the background AI thread
         ctx.video_processor.ex_mgr.set_exercise(selected_ex_id)
         
+        # Handle Buttons
         if start_btn:
             ctx.video_processor.is_active = True
         if stop_btn:
@@ -110,17 +130,17 @@ with col_stats:
         if reset_btn:
             ctx.video_processor.tracker.reset()
         
-        # Pull the live math from the background thread to the UI
+        # Fetch log for the static UI
         log = ctx.video_processor.tracker.get_log()
         
         m_col1, m_col2 = st.columns(2)
-        m_col1.metric("Total Reps", log["summary"]["total_reps"])
+        m_col1.metric("Session Reps", log["summary"]["total_reps"])
         m_col2.metric("Max Angle", f"{log['summary']['max_angle']}°")
         
         st.write("**Recent Reps**")
         if log["milestones"]:
             st.dataframe(log["milestones"], use_container_width=True, hide_index=True)
         else:
-            st.caption("Perform your first rep to see logs...")
+            st.caption("Press Start and perform a rep to log data...")
     else:
         st.info("Start the video stream to see live stats.")
